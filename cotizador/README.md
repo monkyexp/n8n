@@ -36,6 +36,9 @@
 
 - `tarifas`: puede venir plana (`{ day1_rate_local, ... }`) o como mapa por categoría con los nombres del select (`{ "SUV": {...} }`).
 - Parámetros de la curva, por categoría o en la raíz del input: `pct_minimo`, `horas_minimo`, `horas_dia_completo`, `hours_per_day`, `dia_tarifa_minima`.
+- Aeropuerto: `aeropuerto: true`, `recogida_aeropuerto: true`, o `punto_encuentro` con la dirección de recogida (si contiene "aeropuerto/airport" se cobra derecho de piso). Dejar a alguien en el aeropuerto no paga piso.
+- Si llega el vehículo con `itinerario` anidado, también se leen `itinerario.recogida_aeropuerto`, `itinerario.dias_detalle[0].metadata.punto_encuentro` e `itinerario.horas_manejo_totales`.
+- Segundo conductor: manda `horas_manejo_totales` (o `horas_manejo_dia`) para medir horas de manejo reales en vez de horas de servicio.
 - Opcionales: `casetas`, `es_festivo`, `hospedaje_noche`, `km_foraneo_aeropuerto`, `horas_max_conductor`, `second_driver_cost`, `cobra_derecho_piso`, `early_departure_limit`, `late_arrival_limit`, `tarifas_traslado`.
 - Alias aceptados: `id_empresa` / `vehicle` = `empresa_id` / `vehiculo_id`.
 

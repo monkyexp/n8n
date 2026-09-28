@@ -16,11 +16,13 @@ const std = (cat, extra = {}) => ({
   hours_per_day: 15, hora_inicio: '08:00', ...extra,
 });
 
-// Operador premium: mismas tarifas + pct_minimo propio + VIP por vehículo.
-const KML_P = { 'Sedán': 12, SUV: 10, V250: 10, Ducato: 9, Sprinter: 9, 'Minibús': 5, 'Autobús': 3.5 };
+// Operador premium (Intransca): mismas tarifas + pct_minimo propio + VIP por
+// vehículo. Datos de su base: diésel $28, Camry 19 km/l, el resto 6, buses 3.
+const KML_P = { 'Sedán': 19, SUV: 6, V250: 6, Ducato: 6, Sprinter: 6, 'Minibús': 3, 'Autobús': 3 };
 const prem = (cat, extra = {}) => ({
-  categoria: cat, tarifas: PREMIUM.tarifas, diesel_price: 22, km_litro: KML_P[cat], km_foraneo: 120,
-  hora_inicio: '09:00:00', is_vip: true, vip_percentage: PREMIUM.vip_percentage_por_categoria[cat], ...extra,
+  categoria: cat, tarifas: PREMIUM.tarifas, diesel_price: 28, km_litro: KML_P[cat], km_foraneo: 120,
+  hours_per_day: 15, hora_inicio: '10:00:00', is_vip: true,
+  vip_percentage: PREMIUM.vip_percentage_por_categoria[cat], ...extra,
 });
 
 // ── Categorías ──────────────────────────────────────────────────────
@@ -86,18 +88,45 @@ for (const [nombre, horas, km, inicio, casetas, esperados] of ESCENARIOS) {
 // ── Premium: 8 precios reales con VIP ───────────────────────────────
 const REALES_P = [['Sedán', 1890, 5590], ['SUV', 1990, 6350], ['Ducato', 2950, 6950], ['Sprinter', 4950, 9950]];
 
-test('premium: aeropuerto y día completo reales (±1%)', () => {
+// Inputs reales de n8n (Intransca, 29-sep-2026):
+//  1) Aeropuerto MEX → Condesa: 2.03h, 37.5 km con garage, recogida en aeropuerto.
+//  2) Condesa → Coyoacán → Xochimilco → Condesa: 06:00, 13.03h, 75.97 km, 2.48h de manejo.
+const AEROPUERTO_MEX = 'Mexico City International Airport Benito Juárez (MEX), Av. Capitán Carlos León S/N, Peñón de los Baños, Venustiano Carranza, 15620 Ciudad de México, CDMX';
+
+test('premium: precios reales de Intransca con los inputs reales de n8n (±1%)', () => {
   for (const [cat, aer, dia] of REALES_P) {
-    cerca(cot(prem(cat, { aeropuerto: true, horas_servicio: 2.1, km_totales: 48.73 })).total, aer, 0.01, `${cat} aeropuerto`);
-    for (const h of [10, 11, 12]) {
-      cerca(cot(prem(cat, { horas_servicio: h, km_totales: 59 })).total, dia, 0.01, `${cat} día ${h}h`);
-    }
+    const a = cot(prem(cat, { horas_servicio: 2.03, km_totales: 37.5, punto_encuentro: AEROPUERTO_MEX }));
+    cerca(a.total, aer, 0.01, `${cat} aeropuerto`);
+    const d = cot(prem(cat, { horas_servicio: 13.03, km_totales: 75.97, hora_inicio: '06:00:00',
+      horas_manejo_totales: 2.48, punto_encuentro: 'La Condesa, 06140 Mexico City, CDMX, Mexico' }));
+    cerca(d.total, dia, 0.01, `${cat} día 13.03h`);
+    assert.equal(d.renta_horas_extra, 0, `${cat}: 13h (12h + garage) no cobra horas extra`);
+    assert.equal(d.segundo_conductor_requerido, false, `${cat}: 2.48h de manejo no requiere 2º conductor`);
   }
 });
 
+test('aeropuerto se detecta por el punto de recogida; dejar en aeropuerto no paga piso', () => {
+  const recoge = cot(prem('Sprinter', { horas_servicio: 2.03, km_totales: 37.5, punto_encuentro: AEROPUERTO_MEX }));
+  assert.equal(recoge.aeropuerto_aplica, true);
+  assert.equal(recoge.aeropuerto_costo, 597);
+  const deja = cot(prem('Sprinter', { horas_servicio: 2.03, km_totales: 37.5, punto_encuentro: 'La Condesa, CDMX' }));
+  assert.equal(deja.aeropuerto_costo, 0);
+  assert.equal(cot(prem('Sprinter', { horas_servicio: 2, km_totales: 37.5, recogida_aeropuerto: true })).aeropuerto_costo, 597);
+});
+
+test('lee aeropuerto y horas de manejo del objeto `itinerario` anidado (vehículo completo)', () => {
+  const itinerario = { recogida_aeropuerto: null, horas_manejo_totales: 2.48,
+    dias_detalle: [{ metadata: { punto_encuentro: AEROPUERTO_MEX } }] };
+  const r = cot(prem('Sprinter', { horas_servicio: 13.03, km_totales: 75.97, itinerario }));
+  assert.equal(r.aeropuerto_costo, 597);
+  assert.equal(r.segundo_conductor_requerido, false);
+  const flag = cot(prem('Ducato', { horas_servicio: 2.03, km_totales: 37.5, itinerario: { recogida_aeropuerto: true } }));
+  assert.equal(flag.aeropuerto_costo, 597);
+});
+
 test('premium: solo con VIP (sin cambiar pct_minimo) NO alcanza el aeropuerto', () => {
-  const r = cot(prem('Sedán', { tarifas: ESTANDAR, hours_per_day: 12, horas_dia_completo: 10,
-    aeropuerto: true, horas_servicio: 2.1, km_totales: 48.73 }));
+  const r = cot(prem('Sedán', { tarifas: ESTANDAR, hours_per_day: 14, horas_dia_completo: 10,
+    horas_servicio: 2.03, km_totales: 37.5, punto_encuentro: AEROPUERTO_MEX }));
   assert.ok(r.total < 1890 * 0.7, `Sedán solo VIP: ${r.total}`);
 });
 

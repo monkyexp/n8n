@@ -254,7 +254,15 @@ function calcularCotizacion(input) {
   const diaTarifaMinima = Math.max(1, Math.round(param('dia_tarifa_minima', CONFIG_DEFAULT.dia_tarifa_minima)));
 
   // ── Aeropuerto / traslado plano ──
-  const aeropuerto = !!input.aeropuerto;
+  // Recogida en aeropuerto: flag explícito o el punto de encuentro (dirección
+  // de Google) contiene "aeropuerto/airport". Solo la RECOGIDA paga derecho de
+  // piso; dejar a alguien en el aeropuerto no.
+  // Si llega el objeto del vehículo completo, se leen también los datos de `itinerario`.
+  const itin = input.itinerario && typeof input.itinerario === 'object' ? input.itinerario : {};
+  const primerTramo = (Array.isArray(itin.dias_detalle) && itin.dias_detalle[0] && itin.dias_detalle[0].metadata) || {};
+  const puntoEncuentro = String(input.punto_encuentro ?? input.origen ?? primerTramo.punto_encuentro ?? primerTramo.origen ?? '');
+  const aeropuerto = !!(input.aeropuerto || input.recogida_aeropuerto || itin.recogida_aeropuerto ||
+    /aeropuerto|airport|a[ée]roport|aeroporto|flughafen/i.test(puntoEncuentro));
   const cobraDerechoPiso = input.cobra_derecho_piso != null ? !!input.cobra_derecho_piso : aeropuerto;
   const cfgTraslado = input.tarifas_traslado || {};
   const tramosCfg = Array.isArray(cfgTraslado.tramos) && cfgTraslado.tramos.length ? cfgTraslado.tramos : null;
@@ -424,8 +432,11 @@ function calcularCotizacion(input) {
   }
 
   // ── Segundo conductor (más de 12h seguidas en un servicio de un día) ──
+  // Se mide con horas de MANEJO si vienen (horas_manejo_dia / horas_manejo_totales);
+  // si no, con horas de servicio (incluye esperas, puede sobreestimar).
   const horasMaxConductor = param('horas_max_conductor', CONFIG_DEFAULT.horas_max_conductor);
-  const requiereSegundoConductor = !esItinerario && horas_servicio > horasMaxConductor;
+  const horasManejo = num(input.horas_manejo_dia ?? input.horas_manejo_totales ?? itin.horas_manejo_totales, null);
+  const requiereSegundoConductor = !esItinerario && (horasManejo ?? horas_servicio) > horasMaxConductor;
   const costoSegundoRef = num(t.second_driver_cost ?? tRoot.second_driver_cost);
   const costoSegundoConductor = requiereSegundoConductor ? costoSegundoRef : 0;
   if (requiereSegundoConductor && !(costoSegundoRef > 0)) {

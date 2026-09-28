@@ -1,15 +1,15 @@
 {
-  "_nota": "Tarifas = estándar; solo cambian pct_minimo, horas_dia_completo y hours_per_day. VIP va en la tabla de vehículos. V250, Minibús y Autobús: VIP 0 hasta tener precios reales del operador.",
+  "_nota": "Intransca. Tarifas = estándar; solo cambian pct_minimo, horas_dia_completo y hours_per_day (14: 12h de servicio + ~1-2h de traslado a garage). VIP va en la tabla de vehículos. Ajustado con diesel_price 28 y km_por_litro de su base (Camry 19, resto 6). V250, Minibús y Autobús: VIP 0 hasta tener precios reales.",
   "tarifas": {
     "Sedán": {
       "day1_rate_local": 2000,
       "min_rate_local": 1800,
       "day1_rate_foraneo": 2200,
       "min_rate_foraneo": 1800,
-      "pct_minimo": 32.9,
+      "pct_minimo": 33.5,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "SUV": {
       "day1_rate_local": 2500,
@@ -19,7 +19,7 @@
       "pct_minimo": 30.3,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "V250": {
       "day1_rate_local": 6000,
@@ -29,27 +29,27 @@
       "pct_minimo": 48,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "Ducato": {
       "day1_rate_local": 4500,
       "min_rate_local": 4000,
       "day1_rate_foraneo": 4500,
       "min_rate_foraneo": 4000,
-      "pct_minimo": 32.8,
+      "pct_minimo": 33,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "Sprinter": {
       "day1_rate_local": 5500,
       "min_rate_local": 4500,
       "day1_rate_foraneo": 7000,
       "min_rate_foraneo": 4500,
-      "pct_minimo": 43.2,
+      "pct_minimo": 43.5,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "Minibús": {
       "day1_rate_local": 9500,
@@ -59,7 +59,7 @@
       "pct_minimo": 61,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     },
     "Autobús": {
       "day1_rate_local": 12700,
@@ -69,15 +69,15 @@
       "pct_minimo": 60,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
-      "hours_per_day": 12
+      "hours_per_day": 14
     }
   },
   "vip_percentage_por_categoria": {
     "Sedán": 174,
-    "SUV": 149,
+    "SUV": 140,
     "V250": 0,
-    "Ducato": 51,
-    "Sprinter": 78,
+    "Ducato": 47,
+    "Sprinter": 74,
     "Minibús": 0,
     "Autobús": 0
   }
