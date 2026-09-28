@@ -93,7 +93,7 @@ function num(v, def = 0) {
 
 function normalizarCategoria(cat) {
   const c = String(cat || '').trim().toUpperCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (c.includes('DOUBLE'))                          return 'DOUBLE_DECKER';
   if (c.includes('MINIBUS'))                         return 'MINIBUS';
   if (c.includes('MIDSIZE') || c.includes('MID'))    return 'MIDSIZE_BUS';
