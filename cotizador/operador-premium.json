@@ -1,0 +1,84 @@
+{
+  "_nota": "Tarifas = estándar; solo cambian pct_minimo y hours_per_day. VIP va en la tabla de vehículos. V250, Minibús y Autobús: VIP estimado (sin datos reales).",
+  "tarifas": {
+    "Sedán": {
+      "day1_rate_local": 2000,
+      "min_rate_local": 1800,
+      "day1_rate_foraneo": 2200,
+      "min_rate_foraneo": 1800,
+      "pct_minimo": 32.9,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "SUV": {
+      "day1_rate_local": 2500,
+      "min_rate_local": 2500,
+      "day1_rate_foraneo": 3000,
+      "min_rate_foraneo": 2500,
+      "pct_minimo": 30.3,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "V250": {
+      "day1_rate_local": 6000,
+      "min_rate_local": 5000,
+      "day1_rate_foraneo": 6000,
+      "min_rate_foraneo": 5000,
+      "pct_minimo": 48,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "Ducato": {
+      "day1_rate_local": 4500,
+      "min_rate_local": 4000,
+      "day1_rate_foraneo": 4500,
+      "min_rate_foraneo": 4000,
+      "pct_minimo": 32.8,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "Sprinter": {
+      "day1_rate_local": 5500,
+      "min_rate_local": 4500,
+      "day1_rate_foraneo": 7000,
+      "min_rate_foraneo": 4500,
+      "pct_minimo": 43.2,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "Minibús": {
+      "day1_rate_local": 9500,
+      "min_rate_local": 6000,
+      "day1_rate_foraneo": 13000,
+      "min_rate_foraneo": 6000,
+      "pct_minimo": 61,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    },
+    "Autobús": {
+      "day1_rate_local": 14000,
+      "min_rate_local": 9000,
+      "day1_rate_foraneo": 18000,
+      "min_rate_foraneo": 9000,
+      "pct_minimo": 55,
+      "horas_minimo": 3,
+      "horas_dia_completo": 10,
+      "hours_per_day": 12
+    }
+  },
+  "vip_percentage_por_categoria": {
+    "Sedán": 174,
+    "SUV": 149,
+    "V250": 65,
+    "Ducato": 51,
+    "Sprinter": 78,
+    "Minibús": 65,
+    "Autobús": 65
+  }
+}
