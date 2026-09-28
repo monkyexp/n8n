@@ -1,7 +1,8 @@
 // Ejecutar: node --test cotizador/
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularCotizacion: cot, normalizarCategoria } = require('./tarifa.js');
+const { calcularCotizacion: cot, normalizarCategoria, TRAMOS_TRASLADO_DEFAULT } = require('./tarifa.js');
+const PREMIUM = require('./tarifas-cliente-premium.json');
 
 const SPRINTER = { min_rate_local: 5500, day1_rate_local: 5500, min_rate_foraneo: 4500, day1_rate_foraneo: 7000 };
 const MINIBUS  = { min_rate_local: 9500, day1_rate_local: 9500, min_rate_foraneo: 6000, day1_rate_foraneo: 13000 };
@@ -89,8 +90,9 @@ test('horas extra no se regalan después de 19h', () => {
 });
 
 // ── Traslado plano / aeropuerto ─────────────────────────────────────
-test('traslados planos con tabla del operador', () => {
-  const t = (cat, km) => cot(base({ categoria: cat, aeropuerto: true, km_totales: km }));
+test('traslados planos: solo si el operador configura tramos', () => {
+  const t = (cat, km) => cot(base({ categoria: cat, tarifas: undefined, aeropuerto: true, km_totales: km,
+    tarifas_traslado: { tramos: TRAMOS_TRASLADO_DEFAULT } }));
   let r = t('Sprinter', 40);  assert.equal(r.total, 3400 + 597);
   r = t('SUV', 40);           assert.equal(r.total, 1500);
   r = t('SUV', 100);          assert.equal(r.total, 4000 + 80);   // + estacionamiento
@@ -103,7 +105,9 @@ test('input de ejemplo del usuario (SUV 70km aeropuerto, VIP sin %)', () => {
     tarifas: { min_rate_local: 2200, day1_rate_local: 2500, min_rate_foraneo: 1800, day1_rate_foraneo: 2000 },
     aeropuerto: true, km_foraneo: 100, diesel_price: 25, hours_per_day: 15, km_litro: 8,
     is_vip: true, vip_percentage: null });
-  assert.equal(r.total, 4080);
+  // Sin tramos configurados: curva (15h local = día) + combustible 70/8*25
+  assert.equal(r.total, 2500 + 219);
+  assert.equal(r.traslado_plano_aplica, false);
   assert.ok(r.warnings.some(w => /vip/i.test(w)));
 });
 
@@ -114,10 +118,12 @@ test('combustible se cobra también en local; casetas se suman', () => {
   assert.equal(r.casetas_subtotal, 300);
 });
 
-test('ajuste_pct escala renta y traslados, no casetas/derecho de piso', () => {
-  const a = cot(base({ ajuste_pct: 0 })), b = cot(base({ ajuste_pct: 10 }));
+test('VIP escala renta (y traslado plano), no combustible/casetas/derecho de piso', () => {
+  const a = cot(base({})), b = cot(base({ is_vip: true, vip_percentage: 10 }));
   assert.equal(b.renta_subtotal, Math.round(a.renta_subtotal * 1.1));
-  const p = cot(base({ aeropuerto: true, km_totales: 40, ajuste_pct: 10 }));
+  assert.equal(b.combustible_subtotal, a.combustible_subtotal);
+  const p = cot(base({ aeropuerto: true, km_totales: 40, is_vip: true, vip_percentage: 10,
+    tarifas_traslado: { tramos: TRAMOS_TRASLADO_DEFAULT } }));
   assert.equal(p.total, 3740 + 597);
 });
 
@@ -140,7 +146,6 @@ test('fuzz: total finito, no negativo y monótono en horas/km', () => {
       tarifas: undefined, // defaults por categoría
       aeropuerto: rnd() < 0.3,
       is_vip: rnd() < 0.3, vip_percentage: Math.round(rnd() * 30),
-      ajuste_pct: Math.round(rnd() * 40 - 10),
       casetas: Math.round(rnd() * 1000),
     });
     const r = cot(inp);
@@ -159,7 +164,7 @@ test('aeropuerto: más km nunca cuesta menos (bug 146km)', () => {
       let prev = 0;
       for (let km = 5; km <= 500; km++) {
         const r = cot(base({ categoria: cat, tarifas: undefined, aeropuerto: true, km_totales: km,
-          horas_servicio: 2, is_vip: vip > 0, vip_percentage: vip }));
+          horas_servicio: 2, is_vip: vip > 0, vip_percentage: vip, tarifas_traslado: { tramos: TRAMOS_TRASLADO_DEFAULT } }));
         assert.ok(r.total >= prev, `${cat} vip${vip} ${km}km: ${prev}→${r.total}`);
         prev = r.total;
       }
@@ -167,12 +172,88 @@ test('aeropuerto: más km nunca cuesta menos (bug 146km)', () => {
   }
 });
 
-test('entradas raras: hora con segundos, strings, ajuste -100', () => {
+test('entradas raras: hora con segundos, strings, VIP negativo', () => {
   assert.equal(cot(base({ hora_inicio: '03:00:00', horas_servicio: 48, km_totales: 300 })).dias_cobrados, 3.5);
-  const r = cot(base({ horas_servicio: '10', km_totales: '30', ajuste_pct: -100 }));
+  const r = cot(base({ horas_servicio: '10', km_totales: '30', is_vip: true, vip_percentage: -100 }));
   assert.ok(Number.isFinite(r.total) && Number.isFinite(r.dias_cobrados));
   const v = cot(base({ hora_inicio: 'abc' }));
   assert.ok(v.warnings.some(w => /hora_inicio/.test(w)));
   const x = cot({});
   assert.ok(Number.isFinite(x.total));
+});
+
+// ── Cliente premium (precios reales CDMX) ───────────────────────────
+// Minivan = SUV, Maxivan = Ducato (el operador los asigna en el select).
+// Aeropuerto Benito Juárez → Condesa: 2.1h y 48.73 km con ida/vuelta a pensión.
+// Día completo CDMX: 10–12h, 59 km con pensión.
+const REALES = [
+  ['Sedán', 12, 1890, 5590],
+  ['SUV', 10, 1990, 6350],
+  ['Ducato', 9, 2950, 6950],
+  ['Sprinter', 9, 4950, 9950],
+];
+const premium = (cat, kml, extra) => ({ categoria: cat, tarifas: PREMIUM, diesel_price: 22, km_litro: kml,
+  km_foraneo: 120, hora_inicio: '09:00:00', ...extra });
+
+test('cliente premium: aeropuerto y día completo dentro de ±1%', () => {
+  for (const [cat, kml, aer, dia] of REALES) {
+    const a = cot(premium(cat, kml, { aeropuerto: true, horas_servicio: 2.1, km_totales: 48.73 }));
+    const d10 = cot(premium(cat, kml, { horas_servicio: 10, km_totales: 59 }));
+    const d12 = cot(premium(cat, kml, { horas_servicio: 12, km_totales: 59 }));
+    for (const [r, real, n] of [[a, aer, 'aeropuerto'], [d10, dia, 'día 10h'], [d12, dia, 'día 12h']]) {
+      assert.ok(Math.abs(r.total - real) / real <= 0.01, `${cat} ${n}: ${r.total} vs ${real}`);
+    }
+  }
+});
+
+test('cliente premium: curva completa sube sin saltos hacia abajo', () => {
+  for (const [cat, kml] of REALES) {
+    let prev = 0;
+    for (let h = 0.5; h <= 23.5; h += 0.5) {
+      const r = cot(premium(cat, kml, { horas_servicio: h, km_totales: 59 }));
+      assert.ok(r.total >= prev, `${cat} ${h}h: ${prev}→${r.total}`);
+      prev = r.total;
+    }
+  }
+});
+
+test('input real: Sprinter con tarifas planas de referencia (2.1h, 48.73km)', () => {
+  const r = cot({ empresa_id: '48c26674', vehiculo_id: 55, categoria: 'Sprinter', horas_servicio: 2.1,
+    km_totales: 48.73, hora_inicio: '09:00:00', tarifas: SPRINTER, aeropuerto: false, km_foraneo: 120,
+    diesel_price: 22, hours_per_day: 15, km_litro: 9, is_vip: false, vip_percentage: null });
+  assert.equal(r.renta_subtotal, 2750); // mínimo = medio día (default)
+  assert.equal(r.combustible_subtotal, 119);
+  assert.equal(r.total, 2869);
+});
+
+test('input real: tarifas como mapa por categoría + alias id_empresa/vehicle', () => {
+  const r = cot({ id_empresa: '48c26674', vehicle: 62, categoria: 'SUV', horas_servicio: 2.1, km_totales: 48.73,
+    hora_inicio: '09:00:00', km_foraneo: 120, diesel_price: 22, km_litro: 10, aeropuerto: true,
+    tarifas: { SUV: { min_rate_local: 2000, day1_rate_local: 2500, min_rate_foraneo: 2500, day1_rate_foraneo: 3000,
+      airport_floor_fee_aicm: 300, airport_floor_fee_aifa: 300 }, 'Sedán': { day1_rate_local: 1100 } } });
+  assert.equal(r.empresa_id, '48c26674');
+  assert.equal(r.vehiculo_id, 62);
+  assert.equal(r.tarifas_fallback_usado, false);
+  assert.equal(r.renta_subtotal, 1250);
+  assert.equal(r.aeropuerto_costo, 300); // derecho de piso del operador
+});
+
+test('VIP sobre tarifas de referencia no toca a otros operadores', () => {
+  const a = cot(base({ horas_servicio: 11 }));
+  const b = cot(base({ horas_servicio: 11, is_vip: true, vip_percentage: 50 }));
+  assert.ok(b.total > a.total);
+  assert.equal(cot(base({ horas_servicio: 11 })).total, a.total);
+});
+
+test('cliente premium: fuzz de horas (23.75h no puede costar más que 24h)', () => {
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const cats = Object.keys(PREMIUM);
+  for (let i = 0; i < 5000; i++) {
+    const inp = premium(cats[Math.floor(rnd() * cats.length)], 9, {
+      horas_servicio: Math.round(rnd() * 150 * 4) / 4, km_totales: Math.round(rnd() * 900),
+      hora_inicio: `${Math.floor(rnd() * 24)}:00`, aeropuerto: rnd() < 0.3,
+      is_vip: rnd() < 0.5, vip_percentage: Math.round(rnd() * 40) });
+    const a = cot(inp), b = cot({ ...inp, horas_servicio: inp.horas_servicio + 0.25 });
+    assert.ok(b.total >= a.total, `${inp.categoria} ${inp.horas_servicio}h ${inp.hora_inicio}: ${a.total}→${b.total}`);
+  }
 });

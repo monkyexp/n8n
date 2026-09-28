@@ -10,9 +10,11 @@
 //   - Combustible: aparte, km_totales / km_litro × diesel_price.
 //     km_totales YA incluye el recorrido desde y hacia la pensión.
 //   - Casetas: aparte, vienen como input (`casetas`).
-//   - Traslado plano (aeropuerto / punto a punto): precio fijo por tramo de
-//     km que ya incluye combustible; se suman derecho de piso y
-//     estacionamiento si aplican.
+//   - Aeropuerto (`aeropuerto: true`): se cotiza con la curva del operador
+//     (mismas tarifas) + derecho de piso. Solo si el operador configura
+//     `tarifas_traslado.tramos` se usa precio plano por tramo de km.
+//   - VIP (`is_vip` + `vip_percentage`): recargo % sobre renta. Es la
+//     perilla para ajustar precios de un operador (inflación, mercado caro).
 // ══════════════════════════════════════════════════════════════════════
 
 // ── DEFAULTS (el operador puede sobrescribir todo desde el input) ──────
@@ -58,8 +60,18 @@ const TRAMOS_TRASLADO_DEFAULT = [
 
 const RECARGO_TRASLADO_DEFAULT = { km_max: 145, porcentaje: 10 };
 
+// Curva dentro del día (servicios < 24h). Todos se pueden mandar por
+// categoría dentro de `tarifas` o a nivel raíz del input. Los defaults
+// reproducen el comportamiento original (mínimo = medio día).
+//   precio(h) = h ≤ horas_minimo        → day1 × pct_minimo
+//               h < horas_dia_completo  → sube lineal por hora hasta day1
+//               h ≤ hours_per_day       → day1
+//               h > hours_per_day       → day1 + horas extra × day1/hours_per_day
 const CONFIG_DEFAULT = {
   hours_per_day: 15,          // horas incluidas en un día de servicio
+  pct_minimo: 50,             // % de day1 que cuesta el servicio mínimo
+  horas_minimo: null,         // horas que cubre el mínimo (null = hours_per_day / 2)
+  horas_dia_completo: null,   // desde cuántas horas se cobra day1 (null = hours_per_day)
   dia_tarifa_minima: 4,       // día en que la curva llega a min_rate
   hora_salida_temprano: '05:00', // salida antes de esto → +medio día
   hora_llegada_tarde: '19:00',   // llegada después de esto → +medio día
@@ -108,6 +120,17 @@ function precioCategoria(tabla, catNorm) {
   return null;
 }
 
+// `tarifas` puede venir plana ({ day1_rate_local, ... }) o como mapa por
+// categoría ({ "SUV": {...}, "Sprinter": {...} }) con los nombres del select.
+function resolverTarifas(raw, catNorm) {
+  if (!raw || typeof raw !== 'object') return {};
+  if ('day1_rate_local' in raw || 'min_rate_local' in raw || 'day1_rate_foraneo' in raw) return raw;
+  for (const [k, v] of Object.entries(raw)) {
+    if (v && typeof v === 'object' && normalizarCategoria(k) === catNorm) return v;
+  }
+  return {};
+}
+
 // Traslado plano: primer tramo cuyo km_max cubra la distancia.
 function calcularTrasladoPlano(km, catNorm, tramos, recargo) {
   const ordenados = [...tramos].sort((a, b) => a.km_max - b.km_max);
@@ -145,8 +168,8 @@ function calcularCotizacion(input) {
   input = input || {};
   const warnings = [];
 
-  const empresa_id  = input.empresa_id;
-  const vehiculo_id = input.vehiculo_id;
+  const empresa_id  = input.empresa_id ?? input.id_empresa;
+  const vehiculo_id = input.vehiculo_id ?? input.vehicle;
   const categoria   = input.categoria;
 
   let horas_servicio = num(input.horas_servicio);
@@ -155,15 +178,12 @@ function calcularCotizacion(input) {
   const diesel_price = Math.max(0, num(input.diesel_price));
   const km_litro     = Math.max(0, num(input.km_litro));
   const casetas      = Math.max(0, num(input.casetas));
-  const ajustePct    = num(input.ajuste_pct);
-  const factor       = Math.max(0, 1 + ajustePct / 100);
 
-  const hours_per_day   = num(input.hours_per_day, CONFIG_DEFAULT.hours_per_day) > 0
-    ? num(input.hours_per_day, CONFIG_DEFAULT.hours_per_day) : CONFIG_DEFAULT.hours_per_day;
   const diaTarifaMinima = Math.max(1, Math.round(num(input.dia_tarifa_minima, CONFIG_DEFAULT.dia_tarifa_minima)));
 
   const is_vip         = !!input.is_vip;
-  const vip_percentage = num(input.vip_percentage);
+  const vip_percentage = Math.max(0, num(input.vip_percentage));
+  const vipFactor      = is_vip && vip_percentage > 0 ? 1 + vip_percentage / 100 : 1;
   if (is_vip && !(vip_percentage > 0)) {
     warnings.push('is_vip=true pero vip_percentage vacío o 0: no se cobró recargo VIP.');
   }
@@ -190,7 +210,10 @@ function calcularCotizacion(input) {
   }
 
   // ── Tarifas ──
-  const t = input.tarifas || {};
+  const tRoot = input.tarifas && typeof input.tarifas === 'object' ? input.tarifas : {};
+  const t = resolverTarifas(input.tarifas, catNorm);
+  // Parámetro: primero el de la categoría, luego raíz del input, luego default.
+  const param = (k, def) => num(t[k], null) ?? num(input[k], null) ?? def;
   const campos = ['day1_rate_local', 'min_rate_local', 'day1_rate_foraneo', 'min_rate_foraneo'];
   const faltantes = campos.filter(k => !(num(t[k], null) > 0));
   const tarifasFallback = faltantes.length > 0;
@@ -207,16 +230,24 @@ function calcularCotizacion(input) {
 
   // ── Clasificación ──
   const esForaneo = km_totales >= km_foraneo;
-  let day1Rate = (esForaneo ? tarifas.day1_rate_foraneo : tarifas.day1_rate_local) * factor;
-  let minRate  = (esForaneo ? tarifas.min_rate_foraneo  : tarifas.min_rate_local)  * factor;
+  let day1Rate = esForaneo ? tarifas.day1_rate_foraneo : tarifas.day1_rate_local;
+  let minRate  = esForaneo ? tarifas.min_rate_foraneo  : tarifas.min_rate_local;
   if (minRate > day1Rate) {
     warnings.push('min_rate mayor que day1_rate; se usa day1_rate como mínimo.');
     minRate = day1Rate;
   }
   day1Rate = r2(day1Rate);
   minRate  = r2(minRate);
+  // Curva dentro del día
+  let hours_per_day = param('hours_per_day', CONFIG_DEFAULT.hours_per_day);
+  if (!(hours_per_day > 0) || hours_per_day > 24) hours_per_day = CONFIG_DEFAULT.hours_per_day;
+  const pctMinimo  = Math.min(100, Math.max(0, param('pct_minimo', CONFIG_DEFAULT.pct_minimo))) / 100;
+  const horasMin   = Math.min(hours_per_day, Math.max(0, param('horas_minimo', hours_per_day / 2)));
+  const horasDia   = Math.min(hours_per_day, Math.max(horasMin, param('horas_dia_completo', hours_per_day)));
   const medioDia   = r2(day1Rate / 2);
-  const tarifaHora = r2(day1Rate / hours_per_day);
+  const minimo     = r2(day1Rate * pctMinimo);
+  const tarifaHora = r2(day1Rate / hours_per_day);                       // hora extra después del día
+  const tarifaSubida = horasDia > horasMin ? (day1Rate - minimo) / (horasDia - horasMin) : 0; // hora entre mínimo y día
 
   // Curva por día: día 1 = day1Rate, baja lineal hasta minRate en el día
   // `diaTarifaMinima`. Cada día se cobra a SU tarifa (se suman).
@@ -229,14 +260,15 @@ function calcularCotizacion(input) {
   // ── Traslado plano ──
   const aeropuerto = !!input.aeropuerto;
   const cobraDerechoPiso = input.cobra_derecho_piso != null ? !!input.cobra_derecho_piso : aeropuerto;
-  let esTrasladoPlano = aeropuerto;
+  const cfgTraslado = input.tarifas_traslado || {};
+  const tramosCfg = Array.isArray(cfgTraslado.tramos) && cfgTraslado.tramos.length ? cfgTraslado.tramos : null;
+  let esTrasladoPlano = aeropuerto && !!tramosCfg;
   let pisoTraslado = 0;
   let estacionamientoFallback = 0;
   let plano = null;
   if (esTrasladoPlano) {
-    const cfg = input.tarifas_traslado || {};
-    const tramos  = Array.isArray(cfg.tramos) && cfg.tramos.length ? cfg.tramos : TRAMOS_TRASLADO_DEFAULT;
-    const recargo = cfg.recargo_tramo !== undefined ? cfg.recargo_tramo : RECARGO_TRASLADO_DEFAULT;
+    const tramos  = tramosCfg;
+    const recargo = cfgTraslado.recargo_tramo !== undefined ? cfgTraslado.recargo_tramo : RECARGO_TRASLADO_DEFAULT;
     if (km_totales > 0) plano = calcularTrasladoPlano(km_totales, catNorm, tramos, recargo);
     if (!plano) {
       esTrasladoPlano = false;
@@ -247,7 +279,7 @@ function calcularCotizacion(input) {
       const precioUltimo = ultimo && precioCategoria(ultimo.precio, catNorm);
       if (precioUltimo != null && km_totales > ultimo.km_max) {
         const recPct = recargo && km_totales > ultimo.km_max ? num(recargo.porcentaje) : 0;
-        pisoTraslado = r2(precioUltimo * (1 + recPct / 100) * factor);
+        pisoTraslado = r2(precioUltimo * (1 + recPct / 100));
         estacionamientoFallback = precioCategoria(ultimo.estacionamiento, catNorm) || 0;
       }
     }
@@ -260,8 +292,8 @@ function calcularCotizacion(input) {
   // Límites de horario. En viajes de varios días se aplican siempre (con
   // default 05:00 / 19:00). En servicios de un día solo si el operador los
   // configuró: ahí las horas extra ya pagan el tiempo adicional.
-  const limTempranoCfg = input.early_departure_limit ?? t.early_departure_limit;
-  const limTardeCfg    = input.late_arrival_limit    ?? t.late_arrival_limit;
+  const limTempranoCfg = input.early_departure_limit ?? t.early_departure_limit ?? tRoot.early_departure_limit;
+  const limTardeCfg    = input.late_arrival_limit    ?? t.late_arrival_limit    ?? tRoot.late_arrival_limit;
 
   const esItinerario = !esTrasladoPlano && horas_servicio >= 24;
 
@@ -281,8 +313,8 @@ function calcularCotizacion(input) {
 
   if (esTrasladoPlano) {
     const recargoMonto = r2(plano.precio * plano.recargo_pct / 100);
-    costoRenta = r2((plano.precio + recargoMonto) * factor);
-    plano.recargo_monto = r2(recargoMonto * factor);
+    costoRenta = r2(plano.precio + recargoMonto);
+    plano.recargo_monto = recargoMonto;
     bloqueLabel = `Traslado plano (≤${plano.km_max_tramo}km)` + (plano.recargo_pct ? ` + recargo ${plano.recargo_pct}%` : '');
     desgloseDias.push({ dia: 1, tarifa: costoRenta, tipo: 'traslado plano' });
 
@@ -303,15 +335,14 @@ function calcularCotizacion(input) {
     bloqueLabel = `${horas_servicio}h → ${diasCobrados} día(s)`;
 
   } else {
-    // Servicio de un día (menos de 24h)
-    const mitad = hours_per_day / 2;
-    if (horas_servicio <= mitad) {
-      costoRenta = medioDia;
-      bloqueLabel = `${horas_servicio}h → mínimo medio día`;
-      desgloseDias.push({ dia: 1, tarifa: medioDia, tipo: 'medio día (mínimo)' });
-    } else if (horas_servicio <= hours_per_day) {
-      const extra = Math.ceil(horas_servicio - mitad - 1e-9);
-      const sinTope = r2(medioDia + extra * tarifaHora);
+    // Servicio de un día (menos de 24h): curva mínimo → día completo → extras
+    if (horas_servicio <= horasMin) {
+      costoRenta = minimo;
+      bloqueLabel = `${horas_servicio}h → mínimo (${Math.round(pctMinimo * 100)}% del día, hasta ${horasMin}h)`;
+      desgloseDias.push({ dia: 1, tarifa: minimo, tipo: 'mínimo' });
+    } else if (horas_servicio < horasDia) {
+      const extra = Math.ceil(horas_servicio - horasMin - 1e-9);
+      const sinTope = r2(minimo + extra * tarifaSubida);
       if (sinTope >= day1Rate) {
         costoRenta = day1Rate;
         bloqueLabel = `${horas_servicio}h → día completo`;
@@ -319,15 +350,21 @@ function calcularCotizacion(input) {
       } else {
         costoRenta = sinTope;
         horasExtra = extra;
-        costoHorasExtra = r2(extra * tarifaHora);
-        bloqueLabel = `${horas_servicio}h → medio día + ${extra}h extra`;
-        desgloseDias.push({ dia: 1, tarifa: medioDia, tipo: 'medio día (mínimo)' });
-        desgloseDias.push({ dia: 1, tarifa: costoHorasExtra, tipo: `${extra}h extra` });
+        costoHorasExtra = r2(sinTope - minimo);
+        bloqueLabel = `${horas_servicio}h → mínimo + ${extra}h`;
+        desgloseDias.push({ dia: 1, tarifa: minimo, tipo: 'mínimo' });
+        desgloseDias.push({ dia: 1, tarifa: costoHorasExtra, tipo: `${extra}h adicionales` });
       }
+    } else if (horas_servicio <= hours_per_day) {
+      costoRenta = day1Rate;
+      bloqueLabel = `${horas_servicio}h → día completo`;
+      desgloseDias.push({ dia: 1, tarifa: day1Rate, tipo: 'día completo' });
     } else {
       // Más de un día de servicio: día completo + cada hora extra
+      // Tope: las horas extra nunca cuestan más que el día 2 (si no, 23h
+      // saldría más caro que un itinerario de 24h).
       horasExtra = Math.ceil(horas_servicio - hours_per_day - 1e-9);
-      costoHorasExtra = r2(horasExtra * tarifaHora);
+      costoHorasExtra = Math.min(r2(horasExtra * tarifaHora), tarifaDia(2));
       costoRenta = r2(day1Rate + costoHorasExtra);
       bloqueLabel = `${horas_servicio}h → día completo + ${horasExtra}h extra`;
       desgloseDias.push({ dia: 1, tarifa: day1Rate, tipo: 'día completo' });
@@ -351,15 +388,11 @@ function calcularCotizacion(input) {
   }
 
   // ── VIP (sobre renta + penalización) ──
-  let vipCosto = 0;
-  if (is_vip && vip_percentage > 0) {
-    vipCosto = r2((costoRenta + penalizacion) * vip_percentage / 100);
-  }
+  let vipCosto = r2((costoRenta + penalizacion) * (vipFactor - 1));
 
   // ── Piso de traslado largo (ver arriba) ──
   // Se compara incluyendo VIP para que el traslado plano con VIP tampoco
   // quede por encima de un traslado más largo con VIP.
-  const vipFactor = is_vip && vip_percentage > 0 ? 1 + vip_percentage / 100 : 1;
   let ajustePisoTraslado = 0;
   if (pisoTraslado > 0) {
     const actual = (costoRenta + penalizacion) * vipFactor + costoCombustible;
@@ -367,7 +400,7 @@ function calcularCotizacion(input) {
     if (actual < objetivo) {
       ajustePisoTraslado = r2((objetivo - actual) / vipFactor);
       costoRenta = r2(costoRenta + ajustePisoTraslado);
-      if (vipFactor > 1) vipCosto = r2((costoRenta + penalizacion) * vip_percentage / 100);
+      vipCosto = r2((costoRenta + penalizacion) * (vipFactor - 1));
       bloqueLabel += ` (ajustado al mínimo de traslado $${pisoTraslado})`;
     }
   }
@@ -375,7 +408,12 @@ function calcularCotizacion(input) {
   // ── Derecho de piso y estacionamiento ──
   let costoDerechoPiso = 0, costoEstacionamiento = 0;
   if (cobraDerechoPiso) {
-    costoDerechoPiso = esTrasladoPlano ? plano.derecho_piso : (precioCategoria(DERECHO_PISO_DEFAULT, catNorm) || 0);
+    // Del operador: `derecho_piso` o el mayor de sus airport_floor_fee_*.
+    const fees = Object.keys(t).filter(k => k === 'derecho_piso' || k.startsWith('airport_floor_fee'))
+      .map(k => num(t[k], null)).filter(v => v != null && v >= 0);
+    costoDerechoPiso = esTrasladoPlano ? plano.derecho_piso
+      : fees.length ? Math.max(...fees)
+      : (precioCategoria(DERECHO_PISO_DEFAULT, catNorm) || 0);
   }
   costoEstacionamiento = esTrasladoPlano ? plano.estacionamiento : estacionamientoFallback;
 
@@ -393,7 +431,6 @@ function calcularCotizacion(input) {
     es_foraneo: esForaneo,
     horas_servicio,
     dias_cobrados: diasCobrados,
-    ajuste_pct: ajustePct,
 
     traslado_plano_aplica: esTrasladoPlano,
     traslado_plano_km_max: plano && esTrasladoPlano ? plano.km_max_tramo : null,
@@ -405,6 +442,8 @@ function calcularCotizacion(input) {
     renta_day1_rate: esTrasladoPlano ? null : day1Rate,
     renta_min_rate: esTrasladoPlano ? null : minRate,
     renta_medio_dia: esTrasladoPlano ? null : medioDia,
+    renta_minimo: esTrasladoPlano ? null : minimo,
+    renta_curva: esTrasladoPlano ? null : { pct_minimo: Math.round(pctMinimo * 100), horas_minimo: horasMin, horas_dia_completo: horasDia, hours_per_day },
     renta_tarifa_hora: esTrasladoPlano ? null : tarifaHora,
     renta_horas_extra: horasExtra,
     renta_costo_horas_extra: costoHorasExtra,
@@ -429,7 +468,7 @@ function calcularCotizacion(input) {
     estacionamiento_costo: costoEstacionamiento,
 
     segundo_conductor_costo: 0,
-    segundo_conductor_costo_ref: num(t.second_driver_cost),
+    segundo_conductor_costo_ref: num(t.second_driver_cost ?? tRoot.second_driver_cost),
 
     tarifas_fallback_usado: tarifasFallback,
     warnings,
