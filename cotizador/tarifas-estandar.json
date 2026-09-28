@@ -54,11 +54,11 @@
     "horas_dia_completo": 8
   },
   "Autobús": {
-    "day1_rate_local": 14000,
+    "day1_rate_local": 12700,
     "min_rate_local": 9000,
     "day1_rate_foraneo": 18000,
     "min_rate_foraneo": 9000,
-    "pct_minimo": 55,
+    "pct_minimo": 60,
     "horas_minimo": 3,
     "horas_dia_completo": 8
   }

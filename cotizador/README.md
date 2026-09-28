@@ -28,12 +28,15 @@
 | Aeropuerto (`aeropuerto: true`) | se cotiza como cualquier viaje (horas + km) y se suma el derecho de piso: `derecho_piso` o el mayor `airport_floor_fee_*` de la categoría; si no hay, la tabla default. No usa nombres de aeropuertos. |
 | Traslado plano | opcional, solo si el operador manda `tarifas_traslado.tramos` (ver `TRAMOS_TRASLADO_EJEMPLO`) |
 | VIP | `% × (renta + penalización)`. No toca combustible, casetas ni derecho de piso. |
+| Aeropuerto ≤ 145 km | se cobra con tarifa **local** (es traslado, no viaje foráneo). Configurable: `km_foraneo_aeropuerto`. |
+| Hospedaje del conductor | viajes foráneos de varios días: `hospedaje_noche` × noches (default: solo Sprinter, $800). `es_festivo: true` lo quita, porque el cliente paga el hospedaje. |
+| Segundo conductor | más de 12h (`horas_max_conductor`) en un servicio de un día: `segundo_conductor_requerido = true`. Cobra `second_driver_cost` si el operador lo configuró; si no, solo avisa. |
 
 ## Inputs
 
 - `tarifas`: puede venir plana (`{ day1_rate_local, ... }`) o como mapa por categoría con los nombres del select (`{ "SUV": {...} }`).
 - Parámetros de la curva, por categoría o en la raíz del input: `pct_minimo`, `horas_minimo`, `horas_dia_completo`, `hours_per_day`, `dia_tarifa_minima`.
-- Opcionales: `casetas`, `cobra_derecho_piso`, `early_departure_limit`, `late_arrival_limit`, `tarifas_traslado`.
+- Opcionales: `casetas`, `es_festivo`, `hospedaje_noche`, `km_foraneo_aeropuerto`, `horas_max_conductor`, `second_driver_cost`, `cobra_derecho_piso`, `early_departure_limit`, `late_arrival_limit`, `tarifas_traslado`.
 - Alias aceptados: `id_empresa` / `vehicle` = `empresa_id` / `vehiculo_id`.
 
 ## Pendiente

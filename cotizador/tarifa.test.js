@@ -60,17 +60,17 @@ const clase = cat => Object.keys(CASETA).find(k => CASETA[k].includes(cat));
 const ESCENARIOS = [
   // [nombre, horas, km, hora_inicio, casetas {auto,bus2,bus3}, totales esperados por categoría]
   ['3. City tour 1 día (10h, 60 km)', 10, 60, '08:00', { auto: 0, bus2: 0, bus3: 0 },
-    { SUV: 2660, V250: 6144, Ducato: 4660, Sprinter: 5680, 'Minibús': 9788, 'Autobús': 14411 }],
+    { SUV: 2660, V250: 6144, Ducato: 4660, Sprinter: 5680, 'Minibús': 9788, 'Autobús': 13111 }],
   ['4. Teotihuacán (9h, 130 km)', 9, 130, '08:00', { auto: 180, bus2: 330, bus3: 470 },
     { 'Sedán': 2620, SUV: 3527, V250: 6492, Ducato: 5177, Sprinter: 7720, 'Minibús': 13954, 'Autobús': 19361 }],
   ['5. Puebla 1 día (14h, 290 km)', 14, 290, '07:00', { auto: 440, bus2: 800, bus3: 1150 },
     { 'Sedán': 3175, SUV: 4213, V250: 7136, Ducato: 6073, Sprinter: 8670, 'Minibús': 15192, 'Autobús': 21139 }],
   ['7. Querétaro–SMA 3 días (08→18h, 560 km)', 58, 560, '08:00', { auto: 550, bus2: 1000, bus3: 1450 },
-    { 'Sedán': 7684, SUV: 10493, V250: 18894, Ducato: 15493, Sprinter: 20680, 'Minibús': 34688, 'Autobús': 48290 }],
+    { 'Sedán': 7684, SUV: 10493, V250: 18894, Ducato: 15493, Sprinter: 22280, 'Minibús': 34688, 'Autobús': 48290 }],
   ['8. Oaxaca 7 días (06→21h, 1300 km)', 159, 1300, '06:00', { auto: 1500, bus2: 2700, bus3: 3900 },
-    { 'Sedán': 18100, SUV: 24667, V250: 44120, Ducato: 37167, Sprinter: 44850, 'Minibús': 66940, 'Autobús': 96314 }],
+    { 'Sedán': 18100, SUV: 24667, V250: 44120, Ducato: 37167, Sprinter: 49650, 'Minibús': 66940, 'Autobús': 96314 }],
   ['9. Acapulco 4 días (04→20h, 1100 km)', 88, 1100, '04:00', { auto: 1500, bus2: 2700, bus3: 3900 },
-    { 'Sedán': 13231, SUV: 17883, V250: 31140, Ducato: 26633, Sprinter: 33000, 'Minibús': 50980, 'Autobús': 72443 }],
+    { 'Sedán': 13231, SUV: 17883, V250: 31140, Ducato: 26633, Sprinter: 35400, 'Minibús': 50980, 'Autobús': 72443 }],
 ];
 
 for (const [nombre, horas, km, inicio, casetas, esperados] of ESCENARIOS) {
@@ -198,4 +198,95 @@ test('fuzz: más horas, más km o más VIP nunca bajan el precio', () => {
     const v = cot({ ...inp, is_vip: true, vip_percentage: (inp.is_vip ? inp.vip_percentage : 0) + 10 });
     assert.ok(v.total >= r.total, `vip ${cat}: ${r.total}→${v.total}`);
   }
+});
+
+// ── Buses contra la tabla del operador de referencia ────────────────
+const BUS_KML = { 'Minibús': 5, 'Autobús': 3.5 };
+const bus = (cat, extra) => std(cat, { km_litro: BUS_KML[cat], ...extra });
+
+test('buses: aeropuerto CDMX y AIFA contra tabla del operador (±5%)', () => {
+  // AICM ≤55 km; AIFA ≤130 km (~5h con pensión en Coyoacán) + casetas bus.
+  const tabla = { 'Minibús': [7100, 9600, 230], 'Autobús': [9100, 12100, 330] };
+  for (const [cat, [aicm, aifa, cas]] of Object.entries(tabla)) {
+    cerca(cot(bus(cat, { aeropuerto: true, horas_servicio: 2.1, km_totales: 49 })).total, aicm, 0.05, `${cat} AICM`);
+    const r = cot(bus(cat, { aeropuerto: true, horas_servicio: 5, km_totales: 125, casetas: cas }));
+    assert.equal(r.es_foraneo, false, `${cat} AIFA debe cobrarse como traslado local`);
+    cerca(r.total, aifa, 0.05, `${cat} AIFA`);
+  }
+});
+
+test('vans: AIFA contra tabla del operador', () => {
+  // Ducato: el operador lo cobra al AIFA igual que la V250 aunque en AICM es
+  // más barato; con una curva lineal queda ~12% abajo (usar VIP en esa unidad).
+  const tabla = { V250: [5097, 120, 0.05], Ducato: [5097, 230, 0.13], Sprinter: [5297, 230, 0.05] };
+  for (const [cat, [aifa, cas, tol]] of Object.entries(tabla)) {
+    cerca(cot(std(cat, { aeropuerto: true, horas_servicio: 5, km_totales: 125, casetas: cas })).total, aifa, tol, `${cat} AIFA`);
+  }
+});
+
+test('aeropuerto de más de 145 km sí es foráneo', () => {
+  assert.equal(cot(bus('Autobús', { aeropuerto: true, horas_servicio: 5, km_totales: 145 })).es_foraneo, false);
+  assert.equal(cot(bus('Autobús', { aeropuerto: true, horas_servicio: 5, km_totales: 146 })).es_foraneo, true);
+});
+
+test('buses: día local y curva foránea del operador', () => {
+  assert.equal(cot(bus('Minibús', { horas_servicio: 10, km_totales: 60 })).renta_subtotal, 9500);
+  assert.equal(cot(bus('Autobús', { horas_servicio: 10, km_totales: 60 })).renta_subtotal, 12700);
+  // Minibús foráneo: 13,000 / 9,000 / 9,000 / 6,000... (tabla), ±8% acumulado
+  const tabla = [13000, 9000, 9000, 6000, 6000, 6000];
+  for (let n = 1; n <= 7; n++) {
+    let esperado = 0; for (let d = 1; d <= n; d++) esperado += tabla[Math.min(d, 6) - 1];
+    const r = cot(bus('Minibús', { horas_servicio: n === 1 ? 12 : (n - 1) * 24 + 12, hora_inicio: '06:00', km_totales: 300 * n }));
+    cerca(r.renta_subtotal, esperado, 0.08, `Minibús ${n} días`);
+  }
+});
+
+test('buses: curva dentro del día sube sin saltos y el día completo llega a las 8h', () => {
+  for (const cat of ['Minibús', 'Autobús']) {
+    let prev = 0;
+    for (let h = 0.5; h <= 23.5; h += 0.5) {
+      const r = cot(bus(cat, { horas_servicio: h, km_totales: 60 }));
+      assert.ok(r.total >= prev, `${cat} ${h}h: ${prev}→${r.total}`);
+      if (h >= 8 && h <= 15) assert.equal(r.renta_subtotal, cat === 'Minibús' ? 9500 : 12700, `${cat} ${h}h`);
+      prev = r.total;
+    }
+  }
+});
+
+test('input real del usuario: Autobús 12h, 60 km, VIP 65%', () => {
+  const inp = { empresa_id: 'd85d5f62', vehiculo_id: 65, categoria: 'Autobús', horas_servicio: 12, km_totales: 60,
+    hora_inicio: '15:00', km_foraneo: 120, diesel_price: 28, hours_per_day: 15, km_litro: 3, aeropuerto: false,
+    tarifas: { pct_minimo: 55, horas_minimo: 3, hours_per_day: 12, min_rate_local: 9000, day1_rate_local: 14000,
+      min_rate_foraneo: 9000, day1_rate_foraneo: 18000, horas_dia_completo: 10 } };
+  const conVip = cot({ ...inp, is_vip: true, vip_percentage: 65 });
+  assert.equal(conVip.renta_vip_costo, 9100);            // el 65% es lo que lo hace "alto"
+  assert.equal(cot({ ...inp, is_vip: false }).total, 14560);
+  // Con la tarifa estándar nueva (12,700) y sin VIP:
+  const nuevo = cot({ ...inp, tarifas: { ...inp.tarifas, day1_rate_local: 12700 }, is_vip: false });
+  assert.equal(nuevo.total, 12700 + 560);
+});
+
+test('hospedaje: Sprinter $800/noche en foráneo; festivo y autobús no pagan', () => {
+  const viaje = { horas_servicio: 58, hora_inicio: '08:00', km_totales: 560 };
+  const s = cot(std('Sprinter', viaje));
+  assert.equal(s.hospedaje_noches, 2);
+  assert.equal(s.hospedaje_costo, 1600);
+  assert.equal(cot(std('Sprinter', { ...viaje, es_festivo: true })).hospedaje_costo, 0);
+  assert.equal(cot(bus('Autobús', viaje)).hospedaje_costo, 0);
+  assert.equal(cot(std('Sprinter', { ...viaje, km_totales: 100 })).hospedaje_costo, 0); // local: duerme en casa
+  // El operador puede configurarlo por categoría
+  const t = { ...ESTANDAR, 'Autobús': { ...ESTANDAR['Autobús'], hospedaje_noche: 1000 } };
+  assert.equal(cot(bus('Autobús', { ...viaje, tarifas: t })).hospedaje_costo, 2000);
+});
+
+test('segundo conductor: más de 12h en un día', () => {
+  const a = cot(bus('Autobús', { horas_servicio: 12, km_totales: 60 }));
+  assert.equal(a.segundo_conductor_requerido, false);
+  const b = cot(bus('Autobús', { horas_servicio: 14, km_totales: 60 }));
+  assert.equal(b.segundo_conductor_requerido, true);
+  assert.equal(b.segundo_conductor_costo, 0);            // no configurado → solo aviso
+  assert.ok(b.warnings.some(w => /segundo conductor/.test(w)));
+  const t = { ...ESTANDAR, 'Autobús': { ...ESTANDAR['Autobús'], second_driver_cost: 1500 } };
+  const c = cot(bus('Autobús', { horas_servicio: 14, km_totales: 60, tarifas: t }));
+  assert.equal(c.total - b.total, 1500);
 });

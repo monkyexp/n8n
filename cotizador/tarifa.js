@@ -18,6 +18,13 @@
 //     tarifa estándar. No toca combustible, casetas ni derecho de piso.
 //   - Regla: un viaje foráneo nunca cobra menos renta que el mismo viaje
 //     cotizado como local.
+//   - Aeropuerto hasta `km_foraneo_aeropuerto` (145 km con pensión) se cobra
+//     con tarifa local: es un traslado, no un viaje foráneo.
+//   - Hospedaje del conductor: `hospedaje_noche` × noches fuera en viajes
+//     foráneos de varios días (default solo Sprinter $800). `es_festivo: true`
+//     lo quita (el cliente paga el hospedaje).
+//   - Segundo conductor: más de `horas_max_conductor` (12h) seguidas lo
+//     requiere; se cobra `second_driver_cost` si el operador lo configuró.
 // ══════════════════════════════════════════════════════════════════════
 
 // ── TARIFA ESTÁNDAR (base barata; los operadores suben con VIP) ────────
@@ -27,6 +34,8 @@
 // El mínimo local de varios días baja igual que el foráneo, así el foráneo
 // nunca queda por debajo del local.
 // pct_minimo = % del día que cuesta un servicio corto (≤ horas_minimo).
+// Autobús local: el operador no lo publica; 12,700 = Minibús × 1.33 (misma
+// proporción que sus traslados de aeropuerto y su día foráneo).
 const TARIFAS_DEFAULT = {
   SEDAN:     { day1_rate_local: 2000,  min_rate_local: 1800, day1_rate_foraneo: 2200,  min_rate_foraneo: 1800, pct_minimo: 16 },
   SUV:       { day1_rate_local: 2500,  min_rate_local: 2500, day1_rate_foraneo: 3000,  min_rate_foraneo: 2500, pct_minimo: 15 },
@@ -34,7 +43,7 @@ const TARIFAS_DEFAULT = {
   DUCATO:    { day1_rate_local: 4500,  min_rate_local: 4000, day1_rate_foraneo: 4500,  min_rate_foraneo: 4000, pct_minimo: 57 },
   VAN:       { day1_rate_local: 5500,  min_rate_local: 4500, day1_rate_foraneo: 7000,  min_rate_foraneo: 4500, pct_minimo: 59 },
   MINIBUS:   { day1_rate_local: 9500,  min_rate_local: 6000, day1_rate_foraneo: 13000, min_rate_foraneo: 6000, pct_minimo: 61 },
-  LARGE_BUS: { day1_rate_local: 14000, min_rate_local: 9000, day1_rate_foraneo: 18000, min_rate_foraneo: 9000, pct_minimo: 55 },
+  LARGE_BUS: { day1_rate_local: 12700, min_rate_local: 9000, day1_rate_foraneo: 18000, min_rate_foraneo: 9000, pct_minimo: 60 },
 };
 TARIFAS_DEFAULT.MIDSIZE_BUS   = TARIFAS_DEFAULT.LARGE_BUS;
 TARIFAS_DEFAULT.DOUBLE_DECKER = TARIFAS_DEFAULT.LARGE_BUS;
@@ -79,7 +88,14 @@ const CONFIG_DEFAULT = {
   dia_tarifa_minima: 4,         // día en que la curva de varios días llega a min_rate
   hora_salida_temprano: '05:00',
   hora_llegada_tarde: '19:00',
+  km_foraneo_aeropuerto: 145,   // tabla del operador: aeropuerto hasta 145 km = traslado
+  horas_max_conductor: 12,      // transporte turístico: 12h continuas por conductor
 };
+
+// Hospedaje del conductor por noche en viajes foráneos de varios días. El
+// operador de referencia lo cobra en Sprinter; en autobuses lo suele cubrir
+// el cliente/hotel. Editable por categoría con `hospedaje_noche`.
+const HOSPEDAJE_DEFAULT = { VAN: 800 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────
 
@@ -352,7 +368,9 @@ function calcularCotizacion(input) {
     return R;
   }
 
-  const esForaneo = km_totales >= km_foraneo;
+  // Aeropuerto: traslado con tarifa local hasta km_foraneo_aeropuerto.
+  const kmForaneoAeropuerto = Math.max(km_foraneo, param('km_foraneo_aeropuerto', CONFIG_DEFAULT.km_foraneo_aeropuerto));
+  const esForaneo = aeropuerto ? km_totales > kmForaneoAeropuerto : km_totales >= km_foraneo;
   let R;
   let reglaLocalAplicada = false;
 
@@ -393,6 +411,27 @@ function calcularCotizacion(input) {
     }
   }
 
+  // ── Hospedaje del conductor (foráneo de varios días, no festivos) ──
+  let hospedajeNoches = 0, costoHospedaje = 0;
+  const hospedajeNoche = Math.max(0, param('hospedaje_noche', HOSPEDAJE_DEFAULT[catNorm] || 0));
+  if (esItinerario && esForaneo && hospedajeNoche > 0) {
+    hospedajeNoches = Math.max(0, Math.floor((horaFinAbs - 1e-9) / 24));
+    if (input.es_festivo) {
+      warnings.push('Día festivo: hospedaje del conductor por cuenta del cliente.');
+    } else {
+      costoHospedaje = hospedajeNoches * hospedajeNoche;
+    }
+  }
+
+  // ── Segundo conductor (más de 12h seguidas en un servicio de un día) ──
+  const horasMaxConductor = param('horas_max_conductor', CONFIG_DEFAULT.horas_max_conductor);
+  const requiereSegundoConductor = !esItinerario && horas_servicio > horasMaxConductor;
+  const costoSegundoRef = num(t.second_driver_cost ?? tRoot.second_driver_cost);
+  const costoSegundoConductor = requiereSegundoConductor ? costoSegundoRef : 0;
+  if (requiereSegundoConductor && !(costoSegundoRef > 0)) {
+    warnings.push(`Servicio de ${horas_servicio}h: requiere segundo conductor (más de ${horasMaxConductor}h); configura second_driver_cost.`);
+  }
+
   // ── VIP ──
   let vipCosto = r2((costoRenta + penalizacion) * (vipFactor - 1));
 
@@ -419,7 +458,8 @@ function calcularCotizacion(input) {
   const costoEstacionamiento = esTrasladoPlano ? plano.estacionamiento : estacionamientoFallback;
 
   const total = Math.round(
-    costoRenta + penalizacion + vipCosto + costoCombustible + casetas + costoDerechoPiso + costoEstacionamiento
+    costoRenta + penalizacion + vipCosto + costoCombustible + casetas + costoDerechoPiso + costoEstacionamiento +
+    costoHospedaje + costoSegundoConductor
   );
 
   for (const w of warnings) console.log('⚠️ ' + w);
@@ -469,8 +509,12 @@ function calcularCotizacion(input) {
     aeropuerto_costo: costoDerechoPiso,
     estacionamiento_costo: costoEstacionamiento,
 
-    segundo_conductor_costo: 0,
-    segundo_conductor_costo_ref: num(t.second_driver_cost ?? tRoot.second_driver_cost),
+    hospedaje_noches: hospedajeNoches,
+    hospedaje_costo: costoHospedaje,
+
+    segundo_conductor_requerido: requiereSegundoConductor,
+    segundo_conductor_costo: costoSegundoConductor,
+    segundo_conductor_costo_ref: costoSegundoRef,
 
     tarifas_fallback_usado: tarifasFallback,
     warnings,
@@ -481,7 +525,7 @@ function calcularCotizacion(input) {
 
 // ── Exportar para pruebas / ejecutar como nodo n8n ─────────────────────
 if (typeof $input === 'undefined') {
-  module.exports = { calcularCotizacion, normalizarCategoria, timeToHours, TARIFAS_DEFAULT, TRAMOS_TRASLADO_EJEMPLO, DERECHO_PISO_DEFAULT };
+  module.exports = { calcularCotizacion, normalizarCategoria, timeToHours, TARIFAS_DEFAULT, TRAMOS_TRASLADO_EJEMPLO, DERECHO_PISO_DEFAULT, HOSPEDAJE_DEFAULT };
   return;
 }
 const raw = $input.first().json;
