@@ -319,3 +319,12 @@ test('segundo conductor: más de 12h en un día', () => {
   const c = cot(bus('Autobús', { horas_servicio: 14, km_totales: 60, tarifas: t }));
   assert.equal(c.total - b.total, 1500);
 });
+
+test('premium: viaje foráneo de 4 días, 940 km (Intransca: Sprinter 44,950, Ducato 38,950)', () => {
+  const viaje = { horas_servicio: 72, km_totales: 940, hora_inicio: '08:00', casetas: 1000 };
+  const s = cot(prem('Sprinter', viaje)).total;
+  const d = cot(prem('Ducato', viaje)).total;
+  assert.ok(Math.abs(s / 44950 - 1) < 0.02, `Sprinter ${s}`);
+  assert.ok(Math.abs(d / 38950 - 1) < 0.06, `Ducato ${d}`);
+  assert.ok(d < s, 'Ducato debe salir más barata que Sprinter');
+});

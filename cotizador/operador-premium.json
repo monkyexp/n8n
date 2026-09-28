@@ -1,5 +1,5 @@
 {
-  "_nota": "Intransca. Tarifas = estándar; solo cambian pct_minimo, horas_dia_completo y hours_per_day (14: 12h de servicio + ~1-2h de traslado a garage). VIP va en la tabla de vehículos. Ajustado con diesel_price 28 y km_por_litro de su base (Camry 19, resto 6). V250, Minibús y Autobús: VIP 0 hasta tener precios reales.",
+  "_nota": "Intransca. Tarifas = estándar; solo cambian pct_minimo, horas_dia_completo y hours_per_day (14: 12h de servicio + ~1-2h de traslado a garage). VIP va en la tabla de vehículos. Ajustado con diesel_price 28 y km_por_litro de su base (Camry 19, resto 6). V250, Minibús y Autobús: VIP 0 hasta tener precios reales. Foráneo Sprinter y Ducato: 6200/4500 (viaje 4 días 940 km: Sprinter 44,950 real, Ducato 38,950 real; precios finales sin IVA aparte).",
   "tarifas": {
     "Sedán": {
       "day1_rate_local": 2000,
@@ -34,8 +34,8 @@
     "Ducato": {
       "day1_rate_local": 4500,
       "min_rate_local": 4000,
-      "day1_rate_foraneo": 4500,
-      "min_rate_foraneo": 4000,
+      "day1_rate_foraneo": 6200,
+      "min_rate_foraneo": 4500,
       "pct_minimo": 33,
       "horas_minimo": 3,
       "horas_dia_completo": 10,
@@ -44,7 +44,7 @@
     "Sprinter": {
       "day1_rate_local": 5500,
       "min_rate_local": 4500,
-      "day1_rate_foraneo": 7000,
+      "day1_rate_foraneo": 6200,
       "min_rate_foraneo": 4500,
       "pct_minimo": 43.5,
       "horas_minimo": 3,

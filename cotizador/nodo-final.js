@@ -31,6 +31,9 @@ const CASETAS_MULTIPLICADOR = {
   DOUBLE_DECKER: 2.5
 };
 
+// IVA que se suma al subtotal en viajes foráneos. 0 = precios finales (IVA incluido).
+const IVA_FORANEO_PCT = 0;
+
 const requiereSegundoConductor = maxHorasTramo > 8;
 
 const unidadesFinales = calculos.map(c => {
@@ -54,7 +57,7 @@ const unidadesFinales = calculos.map(c => {
 
   const subtotal = c.renta_subtotal + c.combustible_subtotal + (c.penalizacion_costo || 0)
                  + costoAeropuerto + costoHospedaje + segundoConductorCosto + costosCasetas;
-  const iva16 = c.es_foraneo ? Math.round(subtotal * 0.16) : 0;
+  const iva16 = c.es_foraneo ? Math.round(subtotal * IVA_FORANEO_PCT / 100) : 0;
   const total = Math.round(subtotal + iva16);
 
   return {
