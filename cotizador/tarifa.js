@@ -107,6 +107,19 @@ function num(v, def = 0) {
   return Number.isFinite(n) ? n : def;
 }
 
+// Booleanos que pueden venir como texto desde la base o el front: "false",
+// "0", "no" y "" son falso (con !! serían verdaderos).
+function bool(v) {
+  if (typeof v === 'string') return !['', 'false', '0', 'no', 'null', 'undefined'].includes(v.trim().toLowerCase());
+  return !!v;
+}
+
+// Objeto que puede venir como texto JSON (columna jsonb serializada).
+function obj(v) {
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { return null; } }
+  return v && typeof v === 'object' ? v : null;
+}
+
 function normalizarCategoria(cat) {
   const c = String(cat || '').trim().toUpperCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -114,6 +127,8 @@ function normalizarCategoria(cat) {
   if (c.includes('MINIBUS'))                         return 'MINIBUS';
   if (c.includes('MIDSIZE') || c.includes('MID'))    return 'MIDSIZE_BUS';
   if (c.includes('AUTOBUS') || c.includes('BUS'))    return 'LARGE_BUS';
+  if (c.includes('MINIVAN'))                         return 'SUV';
+  if (c.includes('MAXIVAN'))                         return 'DUCATO';
   if (c.includes('SPRINTER') || c.includes('VAN'))   return 'VAN';
   if (c.includes('SUV'))                             return 'SUV';
   if (c.includes('SEDAN') || c.includes('MEDIANO'))  return 'SEDAN';
@@ -198,7 +213,7 @@ function calcularCotizacion(input) {
   const km_litro     = Math.max(0, num(input.km_litro));
   const casetas      = Math.max(0, num(input.casetas));
 
-  const is_vip         = !!input.is_vip;
+  const is_vip         = bool(input.is_vip);
   const vip_percentage = Math.max(0, num(input.vip_percentage));
   const vipFactor      = is_vip && vip_percentage > 0 ? 1 + vip_percentage / 100 : 1;
   if (is_vip && !(vip_percentage > 0)) {
@@ -226,8 +241,8 @@ function calcularCotizacion(input) {
     catNorm = 'VAN';
   }
 
-  const tRoot = input.tarifas && typeof input.tarifas === 'object' ? input.tarifas : {};
-  const t = resolverTarifas(input.tarifas, catNorm);
+  const tRoot = obj(input.tarifas) || {};
+  const t = resolverTarifas(tRoot, catNorm);
   const base = TARIFAS_DEFAULT[catNorm];
   // Parámetro: categoría del operador → raíz del input → default.
   const param = (k, def) => num(t[k], null) ?? num(input[k], null) ?? def;
@@ -258,13 +273,13 @@ function calcularCotizacion(input) {
   // de Google) contiene "aeropuerto/airport". Solo la RECOGIDA paga derecho de
   // piso; dejar a alguien en el aeropuerto no.
   // Si llega el objeto del vehículo completo, se leen también los datos de `itinerario`.
-  const itin = input.itinerario && typeof input.itinerario === 'object' ? input.itinerario : {};
+  const itin = obj(input.itinerario) || {};
   const primerTramo = (Array.isArray(itin.dias_detalle) && itin.dias_detalle[0] && itin.dias_detalle[0].metadata) || {};
   const puntoEncuentro = String(input.punto_encuentro ?? input.origen ?? primerTramo.punto_encuentro ?? primerTramo.origen ?? '');
-  const aeropuerto = !!(input.aeropuerto || input.recogida_aeropuerto || itin.recogida_aeropuerto ||
+  const aeropuerto = !!(bool(input.aeropuerto) || bool(input.recogida_aeropuerto) || bool(itin.recogida_aeropuerto) ||
     /aeropuerto|airport|a[ée]roport|aeroporto|flughafen/i.test(puntoEncuentro));
-  const cobraDerechoPiso = input.cobra_derecho_piso != null ? !!input.cobra_derecho_piso : aeropuerto;
-  const cfgTraslado = input.tarifas_traslado || {};
+  const cobraDerechoPiso = input.cobra_derecho_piso != null ? bool(input.cobra_derecho_piso) : aeropuerto;
+  const cfgTraslado = obj(input.tarifas_traslado) || {};
   const tramosCfg = Array.isArray(cfgTraslado.tramos) && cfgTraslado.tramos.length ? cfgTraslado.tramos : null;
   let esTrasladoPlano = aeropuerto && !!tramosCfg;
   let pisoTraslado = 0;
@@ -296,10 +311,16 @@ function calcularCotizacion(input) {
   // operador los configuró (las horas extra ya pagan el tiempo adicional).
   const limTempranoCfg = input.early_departure_limit ?? t.early_departure_limit ?? tRoot.early_departure_limit;
   const limTardeCfg    = input.late_arrival_limit    ?? t.late_arrival_limit    ?? tRoot.late_arrival_limit;
-  const limTemprano = timeToHours(limTempranoCfg ?? (esItinerario ? CONFIG_DEFAULT.hora_salida_temprano : null));
-  const limTarde    = timeToHours(limTardeCfg    ?? (esItinerario ? CONFIG_DEFAULT.hora_llegada_tarde : null));
+  // Un día largo que cruza la medianoche (más de hours_per_day) también usa
+  // los límites default: así 23.9h y 24h cobran igual la salida temprano /
+  // llegada tarde y no hay salto de ½ día al llegar a 24h.
+  const diaLargoNocturno = !esItinerario && cruzaMedianoche && horas_servicio > hours_per_day;
+  const usaLimitesDefault = esItinerario || diaLargoNocturno;
+  const limTemprano = timeToHours(limTempranoCfg ?? (usaLimitesDefault ? CONFIG_DEFAULT.hora_salida_temprano : null));
+  const limTarde    = timeToHours(limTardeCfg    ?? (usaLimitesDefault ? CONFIG_DEFAULT.hora_llegada_tarde : null));
   const salidaTemprano = limTemprano != null && horaInicio < limTemprano;
-  const llegadaTarde   = limTarde != null && horas_servicio > 0 && (horaFinDia > limTarde || (!esItinerario && cruzaMedianoche));
+  const llegadaTarde   = limTarde != null && horas_servicio > 0 &&
+    (horaFinDia > limTarde || (!esItinerario && limTardeCfg != null && cruzaMedianoche));
 
   // ── Renta (se calcula para local o foráneo) ──
   function calcularRenta(foraneo) {
@@ -310,8 +331,11 @@ function calcularCotizacion(input) {
     const tarifaHora = r2(day1Rate / hours_per_day);
     const tarifaSubida = horasDia > horasMin ? (day1Rate - minimo) / (horasDia - horasMin) : 0;
 
+    // El día 1 siempre cuesta day1 (igual que un servicio de un día); con
+    // dia_tarifa_minima ≤ 2 el día 2 ya va a min_rate.
     const tarifaDia = d => {
-      if (d >= diaTarifaMinima || diaTarifaMinima === 1) return minRate;
+      if (d <= 1) return day1Rate;
+      if (d >= diaTarifaMinima || diaTarifaMinima <= 2) return minRate;
       return r2(day1Rate - ((d - 1) / (diaTarifaMinima - 1)) * (day1Rate - minRate));
     };
 
@@ -370,8 +394,13 @@ function calcularCotizacion(input) {
       R.desglose.push({ dia: 1, tarifa: day1Rate, tipo: 'día completo' });
       R.desglose.push({ dia: 1, tarifa: R.costoHorasExtra, tipo: `${R.horasExtra}h extra` });
     }
-    if (salidaTemprano) { R.penalizacion += medioDia; R.motivos.push('Salida anticipada'); }
-    if (llegadaTarde)   { R.penalizacion += medioDia; R.motivos.push('Llegada tarde'); }
+    // Día largo nocturno: el ½ día se cobra igual que en un itinerario de
+    // los mismos días de calendario (continuidad con 24h).
+    const medioPen = diaLargoNocturno
+      ? r2(tarifaDia(Math.floor((horaFinAbs - 1e-9) / 24) + 2) / 2)
+      : medioDia;
+    if (salidaTemprano) { R.penalizacion += medioPen; R.motivos.push('Salida anticipada'); }
+    if (llegadaTarde)   { R.penalizacion += medioPen; R.motivos.push('Llegada tarde'); }
     R.diasCobrados = r2((day1Rate > 0 ? R.costoRenta / day1Rate : 1) + 0.5 * R.motivos.length);
     return R;
   }
@@ -424,7 +453,7 @@ function calcularCotizacion(input) {
   const hospedajeNoche = Math.max(0, param('hospedaje_noche', HOSPEDAJE_DEFAULT[catNorm] || 0));
   if (esItinerario && esForaneo && hospedajeNoche > 0) {
     hospedajeNoches = Math.max(0, Math.floor((horaFinAbs - 1e-9) / 24));
-    if (input.es_festivo) {
+    if (bool(input.es_festivo)) {
       warnings.push('Día festivo: hospedaje del conductor por cuenta del cliente.');
     } else {
       costoHospedaje = hospedajeNoches * hospedajeNoche;

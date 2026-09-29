@@ -328,3 +328,141 @@ test('premium: viaje foráneo de 4 días, 940 km (Intransca: Sprinter 44,950, Du
   assert.ok(Math.abs(d / 38950 - 1) < 0.06, `Ducato ${d}`);
   assert.ok(d < s, 'Ducato debe salir más barata que Sprinter');
 });
+
+// ── Límites: izquierda / exacto / derecha de cada umbral ────────────
+// Ningún umbral puede bajar el precio, y los saltos tienen que ser del
+// tamaño que dice la regla (una hora, la diferencia foráneo-local, etc.).
+const CONFIGS = { estandar: std, premium: prem };
+const E = 0.01;
+const lado = (f, x) => [f(x - E), f(x), f(x + E)];
+
+test('límites de horas: continuidad y saltos acotados en todos los vehículos', () => {
+  for (const [nombre, mk] of Object.entries(CONFIGS)) for (const cat of CATS) {
+    const f = h => cot(mk(cat, { horas_servicio: h, km_totales: 50, hora_inicio: '08:00' }));
+    const day1 = f(10).renta_day1_rate;
+    const vip = mk === prem ? 1 + (PREMIUM.vip_percentage_por_categoria[cat] || 0) / 100 : 1;
+    const hpd = f(10).renta_curva.hours_per_day;
+    const dc = f(10).renta_curva.horas_dia_completo;
+    const msg = `${nombre} ${cat}`;
+    // horas_minimo: a la izquierda y exacto = mínimo; a la derecha sube UNA hora de la rampa.
+    const [a, b, c] = lado(h => f(h).total, 3);
+    assert.equal(a, b, `${msg} 3h izquierda`);
+    assert.ok(c > b && c - b <= day1 * vip, `${msg} 3h derecha ${b}→${c}`);
+    // horas_dia_completo: continuo (la rampa llega justo a day1).
+    const [d, e2, g] = lado(h => f(h).renta_subtotal, dc);
+    assert.ok(Math.abs(d - e2) <= 1 && e2 === g, `${msg} ${dc}h: ${d}|${e2}|${g}`);
+    // hours_per_day: plano hasta el límite; a la derecha sube una hora extra.
+    const [p, q, r] = lado(h => f(h).renta_subtotal, hpd);
+    assert.equal(p, q, `${msg} ${hpd}h izquierda`);
+    cerca(r - q, (day1 / hpd) * vip, 0.02, `${msg} hora extra`);
+    // 24h: no baja, y el salto es menor que medio día.
+    const [s1, s2, s3] = lado(h => f(h).total, 24);
+    assert.ok(s1 <= s2 && s2 === s3 && s2 - s1 < 0.5 * day1 * vip, `${msg} 24h: ${s1}|${s2}|${s3}`);
+    // 48h / 72h desde las 08:00: los días de calendario no cambian → plano.
+    for (const x of [48, 72]) {
+      const [u, v, w] = lado(h => f(h).total, x);
+      assert.ok(u === v && v === w, `${msg} ${x}h: ${u}|${v}|${w}`);
+    }
+  }
+});
+
+test('24h de noche: sin salto de ½ día (salida antes de 05:00 / llegada después de 19:00)', () => {
+  for (const cat of CATS) for (const ini of ['04:30', '19:30', '23:00']) {
+    const f = h => cot(prem(cat, { horas_servicio: h, km_totales: 200, hora_inicio: ini }));
+    const antes = f(23.99), justo = f(24);
+    assert.ok(justo.total >= antes.total, `${cat} ${ini}: baja ${antes.total}→${justo.total}`);
+    assert.ok(justo.total - antes.total < 0.5 * justo.renta_day1_rate * 2.8, `${cat} ${ini}: salto ${antes.total}→${justo.total}`);
+    assert.equal(antes.penalizacion_motivo, justo.penalizacion_motivo, `${cat} ${ini}: mismas penalizaciones`);
+  }
+});
+
+test('día largo que NO cruza medianoche no paga llegada tarde (13h de 06:00 a 19:03, 16h hasta 24:00)', () => {
+  assert.equal(cot(prem('Sprinter', { horas_servicio: 13.03, km_totales: 76, hora_inicio: '06:00' })).penalizacion_costo, 0);
+  assert.equal(cot(std('Sprinter', { horas_servicio: 16, km_totales: 76, hora_inicio: '08:00' })).penalizacion_costo, 0);
+});
+
+test('límite km_foraneo: el salto es solo la diferencia foráneo − local de la renta', () => {
+  for (const [nombre, mk] of Object.entries(CONFIGS)) for (const cat of CATS) {
+    const f = km => cot(mk(cat, { horas_servicio: 10, km_totales: km }));
+    const [a, b, c] = [f(120 - E), f(120), f(120 + E)];
+    assert.equal(a.es_foraneo, false); assert.equal(b.es_foraneo, true);
+    assert.ok(b.total >= a.total, `${nombre} ${cat}: baja al volverse foráneo ${a.total}→${b.total}`);
+    const saltoRenta = (b.renta_subtotal + b.penalizacion_costo) - (a.renta_subtotal + a.penalizacion_costo);
+    assert.ok(Math.abs((b.total - a.total) - saltoRenta) <= 1, `${nombre} ${cat}: el salto no es solo renta`);
+    assert.ok(Math.abs(c.total - b.total) <= 1, `${nombre} ${cat}: 120→120.01 km`);
+  }
+});
+
+test('límite aeropuerto 145 km: local hasta 145, foráneo después, sin bajar', () => {
+  for (const [nombre, mk] of Object.entries(CONFIGS)) for (const cat of CATS) {
+    const f = km => cot(mk(cat, { horas_servicio: 3, km_totales: km, aeropuerto: true }));
+    const [a, b, c] = [f(145 - E), f(145), f(145 + E)];
+    assert.equal(b.es_foraneo, false, `${nombre} ${cat} 145 km`);
+    assert.equal(c.es_foraneo, true, `${nombre} ${cat} 145.01 km`);
+    assert.ok(a.total <= b.total && b.total <= c.total, `${nombre} ${cat}: ${a.total}|${b.total}|${c.total}`);
+  }
+});
+
+test('límite segundo conductor: 12h de manejo no, 12.01h sí', () => {
+  const f = hm => cot(prem('Sprinter', { horas_servicio: 14, km_totales: 600, horas_manejo_totales: hm }));
+  assert.equal(f(12).segundo_conductor_requerido, false);
+  assert.equal(f(12.01).segundo_conductor_requerido, true);
+});
+
+test('límite VIP: 0% = sin VIP; subir 1% nunca baja', () => {
+  const f = v => cot(prem('SUV', { horas_servicio: 5, km_totales: 50, is_vip: true, vip_percentage: v })).total;
+  assert.equal(f(0), cot(prem('SUV', { horas_servicio: 5, km_totales: 50, is_vip: false })).total);
+  for (let v = 0; v < 300; v += 1) assert.ok(f(v + 1) >= f(v), `VIP ${v}→${v + 1}`);
+});
+
+test('dia_tarifa_minima = 1: el día 1 sigue costando day1 (24h no sale más barato que 23h)', () => {
+  const T = { Ducato: { ...ESTANDAR.Ducato, dia_tarifa_minima: 1, hours_per_day: 8 } };
+  const f = h => cot(std('Ducato', { tarifas: T, horas_servicio: h, km_totales: 50, hora_inicio: '12:00' })).total;
+  assert.ok(f(24) >= f(23.99), `${f(23.99)}→${f(24)}`);
+});
+
+test('valores de la base como texto: "false", "0" y JSON en string', () => {
+  const b = { categoria: 'Autobús', horas_servicio: 5, km_totales: 50, diesel_price: 28, km_litro: 3 };
+  const base = cot(b).total;
+  assert.equal(cot({ ...b, is_vip: 'false', vip_percentage: 65 }).total, base);
+  assert.ok(cot({ ...b, is_vip: 'true', vip_percentage: 65 }).total > base);
+  assert.equal(cot({ ...b, aeropuerto: 'false' }).total, base);
+  assert.equal(cot({ ...b, aeropuerto: '0' }).aeropuerto_costo, 0);
+  const r = cot({ ...b, tarifas: JSON.stringify({ 'Autobús': { ...ESTANDAR['Autobús'], day1_rate_local: 20000 } }) });
+  assert.equal(r.tarifas_fallback_usado, false);
+  assert.equal(r.renta_day1_rate, 20000);
+});
+
+test('Minivan = SUV y Maxivan = Ducato (no Sprinter)', () => {
+  assert.equal(normalizarCategoria('Minivan'), 'SUV');
+  assert.equal(normalizarCategoria('Maxivan'), 'DUCATO');
+  assert.equal(normalizarCategoria('Sprinter'), 'VAN');
+});
+
+test('fuzz de configuraciones raras del operador: nunca baja y las partes suman el total', () => {
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  for (let i = 0; i < 5000; i++) {
+    const d1l = Math.round(1000 + rnd() * 15000), d1f = Math.round(d1l * (0.7 + rnd() * 0.8));
+    const cat = pick(CATS);
+    const T = { [cat]: { day1_rate_local: d1l, min_rate_local: Math.round(d1l * (0.5 + rnd() * 0.7)),
+      day1_rate_foraneo: d1f, min_rate_foraneo: Math.round(d1f * (0.5 + rnd() * 0.7)),
+      pct_minimo: pick([0, 10, 33, 50, 100, 120, -5]), horas_minimo: pick([0, 1, 3, 5, 8]),
+      horas_dia_completo: pick([0, 3, 8, 10, 12, 16]), hours_per_day: pick([8, 10, 12, 14, 15, 24, 30, 0]),
+      dia_tarifa_minima: pick([0, 1, 2, 4, 7]) } };
+    const inp = { categoria: cat, tarifas: T, diesel_price: 28, km_litro: pick([3, 6, 19]), km_foraneo: pick([0, 50, 120, 300]),
+      horas_servicio: Math.round(rnd() * 120 * 20) / 20, km_totales: Math.round(rnd() * 3000) / 2,
+      hora_inicio: `${Math.floor(rnd() * 24)}:${pick(['00', '15', '30', '45'])}`, aeropuerto: rnd() < 0.3,
+      is_vip: rnd() < 0.5, vip_percentage: Math.round(rnd() * 200), casetas: Math.round(rnd() * 2000) };
+    const r = cot(inp);
+    assert.ok(Number.isFinite(r.total) && r.total >= 0, JSON.stringify(inp));
+    const partes = r.renta_subtotal + r.penalizacion_costo + r.combustible_subtotal + r.casetas_subtotal +
+      r.aeropuerto_costo + r.estacionamiento_costo + r.hospedaje_costo + r.segundo_conductor_costo;
+    assert.ok(Math.abs(partes - r.total) <= 2, `partes ${partes} vs total ${r.total}`);
+    for (const dh of [0.05, 1]) {
+      const h = cot({ ...inp, horas_servicio: inp.horas_servicio + dh });
+      assert.ok(h.total >= r.total, `+${dh}h ${JSON.stringify(inp)}: ${r.total}→${h.total}`);
+    }
+    assert.ok(cot({ ...inp, km_totales: inp.km_totales + 0.5 }).total >= r.total, `km ${JSON.stringify(inp)}`);
+  }
+});

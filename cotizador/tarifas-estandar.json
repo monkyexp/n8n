@@ -6,7 +6,9 @@
     "min_rate_foraneo": 1800,
     "pct_minimo": 16,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "SUV": {
     "day1_rate_local": 2500,
@@ -15,7 +17,9 @@
     "min_rate_foraneo": 2500,
     "pct_minimo": 15,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "V250": {
     "day1_rate_local": 6000,
@@ -24,7 +28,9 @@
     "min_rate_foraneo": 5000,
     "pct_minimo": 48,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "Ducato": {
     "day1_rate_local": 4500,
@@ -33,7 +39,9 @@
     "min_rate_foraneo": 4000,
     "pct_minimo": 57,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "Sprinter": {
     "day1_rate_local": 5500,
@@ -42,7 +50,9 @@
     "min_rate_foraneo": 4500,
     "pct_minimo": 59,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "Minibús": {
     "day1_rate_local": 9500,
@@ -51,7 +61,9 @@
     "min_rate_foraneo": 6000,
     "pct_minimo": 61,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   },
   "Autobús": {
     "day1_rate_local": 12700,
@@ -60,6 +72,8 @@
     "min_rate_foraneo": 9000,
     "pct_minimo": 60,
     "horas_minimo": 3,
-    "horas_dia_completo": 8
+    "horas_dia_completo": 8,
+    "hours_per_day": 15,
+    "dia_tarifa_minima": 4
   }
 }

@@ -1,8 +1,9 @@
 # Cotizador de transporte (nodo Code de n8n)
 
+- `nodo-final.js`: nodo que arma la respuesta del webhook con lo que calcula el cotizador.
 - `tarifa.js`: pega el archivo completo en un nodo **Code** de n8n. También se puede usar con `require` en pruebas.
-- `tarifa.test.js`: pruebas. Se corren con `node --test cotizador/tarifa.test.js`.
-- `tarifas-estandar.json`: **tarifa estándar** (base barata) con los nombres del select. Es la que usa el código cuando el operador no manda las suyas.
+- `tarifa.test.js`: pruebas (incluye límites izquierda/exacto/derecha de cada umbral y fuzz de configuraciones raras). Se corren con `node --test cotizador/tarifa.test.js`.
+- `tarifas-estandar.json`: **tarifa estándar** (base barata) con los nombres del select, lista para pegar en `tarifas_config`. Es la que usa el código cuando el operador no manda las suyas.
 - `operador-premium.json`: configuración del operador caro de CDMX. Son las mismas tarifas estándar, solo cambian `pct_minimo` y `hours_per_day`, y lleva el **VIP por categoría** que va en la tabla de vehículos. V250, Minibús y Autobús tienen VIP estimado, porque no hay datos reales.
 
 ## Cómo se ajusta un operador
@@ -21,7 +22,7 @@
 | Hasta `hours_per_day` | `day1` |
 | Más de `hours_per_day` (menos de 24h) | `day1` + cada hora extra a `day1 / hours_per_day` (tope: tarifa del día 2) |
 | Varios días (≥ 24h) | días de calendario (inclusivo), cada día a su tarifa: baja en línea recta de `day1` a `min` y llega a `min` en el día 4 |
-| Medio día extra | varios días: salida antes de las 05:00 y/o llegada después de las 19:00 (+½ día cada una). Un día: solo si el operador configuró `early_departure_limit` / `late_arrival_limit`. |
+| Medio día extra | varios días: salida antes de las 05:00 y/o llegada después de las 19:00 (+½ día cada una). Un día: solo si el operador configuró `early_departure_limit` / `late_arrival_limit`, o si es un día largo (más de `hours_per_day`) que cruza la medianoche; así 23.9h y 24h cobran igual. |
 | Foráneo contra local | un viaje foráneo nunca cobra menos renta que el mismo viaje en local (`regla_minimo_local`). Si la tarifa foránea es menor que la local, sale un aviso en `warnings`. |
 | Combustible | siempre: `km_totales / km_litro × diesel_price` |
 | Casetas | input `casetas`, se suma tal cual |
@@ -41,6 +42,9 @@
 - Segundo conductor: manda `horas_manejo_totales` (o `horas_manejo_dia`) para medir horas de manejo reales en vez de horas de servicio.
 - Opcionales: `casetas`, `es_festivo`, `hospedaje_noche`, `km_foraneo_aeropuerto`, `horas_max_conductor`, `second_driver_cost`, `cobra_derecho_piso`, `early_departure_limit`, `late_arrival_limit`, `tarifas_traslado`.
 - Alias aceptados: `id_empresa` / `vehicle` = `empresa_id` / `vehiculo_id`.
+- Booleanos como texto (`"false"`, `"0"`, `"no"`) cuentan como falso; `tarifas` puede venir como texto JSON.
+- Categorías: `Minivan` = SUV, `Maxivan` = Ducato.
+- `dia_tarifa_minima`: el día 1 siempre cuesta `day1`; con 1 o 2, el día 2 ya va a `min_rate`.
 
 ## Pendiente
 
